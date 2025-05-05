@@ -47,7 +47,7 @@ public class Config {
         try {
             configFile.getParentFile().mkdirs();
             String defaultContent = "target-server: pokemon\n"
-                    + "points-increment-minutes: 1\n"
+                    + "points-increment-seconds: 1\n"
                     + "connect-first-player-seconds: 5\n"
                     + "send-priority-messages-seconds: 30\n";
             java.nio.file.Files.writeString(configFile.toPath(), defaultContent);
