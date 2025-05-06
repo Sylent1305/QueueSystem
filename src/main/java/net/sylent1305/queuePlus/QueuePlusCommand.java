@@ -4,7 +4,7 @@ import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
-import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import java.util.*;
 
@@ -12,6 +12,7 @@ public class QueuePlusCommand implements SimpleCommand {
 
     private final QueuePlus plugin;
     private final ProxyServer proxy;
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
     private final Map<String, SimpleCommand> subCommands = new HashMap<>();
 
@@ -35,7 +36,7 @@ public class QueuePlusCommand implements SimpleCommand {
         List<String> args = Arrays.asList(invocation.arguments());
 
         if (args.isEmpty()) {
-            invocation.source().sendMessage(Component.text("Usage: /queueplus <subcommand> [args]"));
+            invocation.source().sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.usage")));
             return;
         }
 
@@ -43,7 +44,9 @@ public class QueuePlusCommand implements SimpleCommand {
         SimpleCommand subCommand = subCommands.get(subCmd);
 
         if (subCommand == null) {
-            invocation.source().sendMessage(Component.text("Unknown subcommand: " + subCmd));
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put("command", subCmd);
+            invocation.source().sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.unknown-command", replacements)));
             return;
         }
 
@@ -91,7 +94,7 @@ public class QueuePlusCommand implements SimpleCommand {
 
         if (subCommand != null) {
             String[] subArgs = args.size() > 1 ? args.subList(1, args.size()).toArray(new String[0]) : new String[0];
-            subCommand.execute(new SimpleCommand.Invocation() {
+            return subCommand.suggest(new SimpleCommand.Invocation() {
                 @Override
                 public CommandSource source() {
                     return invocation.source();
@@ -119,11 +122,13 @@ public class QueuePlusCommand implements SimpleCommand {
         public void execute(SimpleCommand.Invocation invocation) {
             CommandSource source = invocation.source();
             if (!source.hasPermission("queueplus.reload")) {
-                source.sendMessage(Component.text("You don't have permission to reload config."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.no-permission")));
                 return;
             }
             plugin.reloadConfig();
-            source.sendMessage(Component.text("QueuePlus config reloaded! Target server: " + plugin.getTargetServer()));
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put("server", plugin.getTargetServer());
+            source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.config.reloaded", replacements)));
         }
 
         @Override
@@ -138,19 +143,27 @@ public class QueuePlusCommand implements SimpleCommand {
             CommandSource source = invocation.source();
             String[] args = invocation.arguments();
             if (args.length < 1) {
-                source.sendMessage(Component.text("Usage: /queueplus checkpoints <player>"));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.usage")));
                 return;
             }
 
             String playerName = args[0];
             Optional<Player> targetOpt = proxy.getPlayer(playerName);
             if (targetOpt.isEmpty()) {
-                source.sendMessage(Component.text("Player not found or not online."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.player-not-found")));
                 return;
             }
             Player target = targetOpt.get();
-            int points = plugin.getPlayerPoints(target.getUniqueId());
-            source.sendMessage(Component.text("Player " + playerName + " has " + points + " points."));
+            int totalPoints = plugin.getTotalPoints(target.getUniqueId());
+            int queuePoints = plugin.getQueuePoints(target.getUniqueId());
+            int bonusPoints = plugin.getBonusPoints(target.getUniqueId());
+            
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put("player", playerName);
+            replacements.put("total", String.valueOf(totalPoints));
+            replacements.put("queue", String.valueOf(queuePoints));
+            replacements.put("bonus", String.valueOf(bonusPoints));
+            source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.player-points-info", replacements)));
         }
 
         @Override
@@ -175,18 +188,18 @@ public class QueuePlusCommand implements SimpleCommand {
         public void execute(SimpleCommand.Invocation invocation) {
             CommandSource source = invocation.source();
             if (!(source instanceof Player player)) {
-                source.sendMessage(Component.text("Only players can join the queue."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.player-only")));
                 return;
             }
             UUID playerUUID = player.getUniqueId();
             if (plugin.sortedQueue.contains(playerUUID)) {
-                player.sendMessage(Component.text("You are already in the queue."));
+                player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.already-in-queue")));
                 return;
             }
             plugin.sortedQueue.add(playerUUID);
-            plugin.startPoints.put(playerUUID, 0);
-            plugin.playerPoints.put(playerUUID, 0);
-            player.sendMessage(Component.text("You joined the queue."));
+            plugin.queuePoints.put(playerUUID, 0);
+            player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.joined-queue")));
+            plugin.sendQueueStatus(player);
         }
 
         @Override
@@ -200,18 +213,17 @@ public class QueuePlusCommand implements SimpleCommand {
         public void execute(SimpleCommand.Invocation invocation) {
             CommandSource source = invocation.source();
             if (!(source instanceof Player player)) {
-                source.sendMessage(Component.text("Only players can leave the queue."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.player-only")));
                 return;
             }
             UUID playerUUID = player.getUniqueId();
             if (!plugin.sortedQueue.contains(playerUUID)) {
-                player.sendMessage(Component.text("You are not in the queue."));
+                player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.not-in-queue")));
                 return;
             }
             plugin.sortedQueue.remove(playerUUID);
-            plugin.startPoints.remove(playerUUID);
-            plugin.playerPoints.remove(playerUUID);
-            player.sendMessage(Component.text("You left the queue."));
+            plugin.queuePoints.remove(playerUUID);
+            player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.left-queue")));
         }
 
         @Override
@@ -225,18 +237,25 @@ public class QueuePlusCommand implements SimpleCommand {
         public void execute(SimpleCommand.Invocation invocation) {
             CommandSource source = invocation.source();
             if (!(source instanceof Player player)) {
-                source.sendMessage(Component.text("Only players can use this command."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.player-only")));
                 return;
             }
             UUID playerUUID = player.getUniqueId();
             if (!plugin.sortedQueue.contains(playerUUID)) {
-                player.sendMessage(Component.text("You are not in the queue."));
+                player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.not-in-queue")));
                 return;
             }
             int pos = plugin.sortedQueue.indexOf(playerUUID) + 1;
-            int points = plugin.playerPoints.getOrDefault(playerUUID, 0);
-            player.sendMessage(Component.text("Your position in the queue: " + pos));
-            player.sendMessage(Component.text("Your points: " + points));
+            int queuePts = plugin.getQueuePoints(playerUUID);
+            int bonusPts = plugin.getBonusPoints(playerUUID);
+            int totalPts = plugin.getTotalPoints(playerUUID);
+            
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put("position", String.valueOf(pos));
+            replacements.put("queue", String.valueOf(queuePts));
+            replacements.put("bonus", String.valueOf(bonusPts));
+            replacements.put("total", String.valueOf(totalPts));
+            player.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.player-position-info", replacements)));
         }
 
         @Override
@@ -252,31 +271,62 @@ public class QueuePlusCommand implements SimpleCommand {
         public void execute(SimpleCommand.Invocation invocation) {
             CommandSource source = invocation.source();
             String[] args = invocation.arguments();
-            if (args.length != 2) {
-                source.sendMessage(Component.text("Usage: /queueplus <setpoints|addpoints|removepoints> <player> <points>"));
+            if (args.length < 2) {
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.usage")));
                 return;
             }
 
             String playerName = args[0];
-            int pointsValue;
+            int amount;
             try {
-                pointsValue = Integer.parseInt(args[1]);
+                amount = Integer.parseInt(args[1]);
             } catch (NumberFormatException e) {
-                source.sendMessage(Component.text("Points must be a valid number."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.amount-must-be-number")));
                 return;
             }
 
             Optional<Player> targetOpt = proxy.getPlayer(playerName);
             if (targetOpt.isEmpty()) {
-                source.sendMessage(Component.text("Player not found or not online."));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.commands.player-not-found")));
                 return;
             }
 
-            UUID targetUuid = targetOpt.get().getUniqueId();
-            int currentPoints = plugin.playerPoints.getOrDefault(targetUuid, 0);
-            int newPoints = modifyPoints(currentPoints, pointsValue);
-            plugin.playerPoints.put(targetUuid, newPoints);
-            source.sendMessage(Component.text("Updated points for " + playerName + " to " + newPoints));
+            Player target = targetOpt.get();
+            UUID targetUUID = target.getUniqueId();
+            int currentPoints = plugin.getBonusPoints(targetUUID);
+            int newPoints = modifyPoints(currentPoints, amount);
+            plugin.setBonusPoints(targetUUID, newPoints);
+            
+            // Re-sort the queue if the player is in it
+            if (plugin.sortedQueue.contains(targetUUID)) {
+                // Remove the player from their current position
+                plugin.sortedQueue.remove(targetUUID);
+                
+                // Find the correct position based on total points
+                int insertIndex = 0;
+                for (UUID uuid : plugin.sortedQueue) {
+                    int otherPoints = plugin.getTotalPoints(uuid);
+                    if (plugin.getTotalPoints(targetUUID) > otherPoints) {
+                        break;
+                    }
+                    insertIndex++;
+                }
+                
+                // Insert the player at the correct position
+                plugin.sortedQueue.add(insertIndex, targetUUID);
+                
+                // Notify the player of their new position
+                int newPosition = insertIndex + 1;
+                Map<String, String> replacements = new HashMap<>();
+                replacements.put("points", String.valueOf(newPoints));
+                replacements.put("position", String.valueOf(newPosition));
+                target.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.points-updated", replacements)));
+            } else {
+                Map<String, String> replacements = new HashMap<>();
+                replacements.put("player", playerName);
+                replacements.put("points", String.valueOf(newPoints));
+                source.sendMessage(miniMessage.deserialize(plugin.pluginConfig.getMessage("messages.queue-actions.player-points-updated", replacements)));
+            }
         }
 
         @Override
@@ -313,7 +363,7 @@ public class QueuePlusCommand implements SimpleCommand {
     private class RemovePointsSubCommand extends PointsSubCommandBase {
         @Override
         int modifyPoints(int currentPoints, int modValue) {
-            return currentPoints - modValue;
+            return Math.max(0, currentPoints - modValue);
         }
     }
 }
